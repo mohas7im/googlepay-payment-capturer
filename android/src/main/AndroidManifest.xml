@@ -1,0 +1,45 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Permissions the host app may add (see README):
+         ACCESS_FINE_LOCATION / ACCESS_COARSE_LOCATION / ACCESS_BACKGROUND_LOCATION
+           tag outgoing payments with where they were made.
+         POST_NOTIFICATIONS  the "payment captured" notification.
+         WRITE_SECURE_SETTINGS  (granted over adb) switches the reader back on
+           after an app update. -->
+
+    <application>
+        <!-- Reads payment notifications from GPay, PhonePe, Paytm, BHIM and banks -->
+        <service
+            android:name="io.github.mohas7im.google_pay_payment_capturer.GPayNotificationListener"
+            android:label="@string/google_pay_payment_capturer_notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Reads outgoing payment / split screens of the UPI apps -->
+        <service
+            android:name="io.github.mohas7im.google_pay_payment_capturer.PaymentAccessibilityService"
+            android:label="@string/google_pay_payment_capturer_accessibility_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/google_pay_payment_capturer_accessibility_config" />
+        </service>
+
+        <!-- Switches the Payment Reader back on after an app update -->
+        <receiver
+            android:name="io.github.mohas7im.google_pay_payment_capturer.ReaderRestoreReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

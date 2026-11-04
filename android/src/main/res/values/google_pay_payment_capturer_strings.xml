@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Define a string with the same name in the app to rename these. -->
+<resources>
+    <string name="google_pay_payment_capturer_notification_listener_label">Payment Notification Reader</string>
+    <string name="google_pay_payment_capturer_accessibility_label">Payment Reader</string>
+    <string name="google_pay_payment_capturer_accessibility_description">Inspects payment success screens in Google Pay, PhonePe, and Paytm to automatically log outgoing expenses without requiring Bank SMS.</string>
+</resources>

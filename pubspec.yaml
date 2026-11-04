@@ -1,0 +1,34 @@
+name: google_pay_payment_capturer
+description: >-
+  Reads UPI payments on Android — Google Pay, PhonePe, Paytm, BHIM — from their
+  notifications and their payment screens (accessibility), including the
+  payee, UPI reference, group splits and where the payment was made.
+version: 0.1.0
+repository: https://github.com/mohas7im/googlepay-payment-capturer
+issue_tracker: https://github.com/mohas7im/googlepay-payment-capturer/issues
+topics:
+  - upi
+  - payments
+  - google-pay
+  - accessibility
+  - notifications
+
+environment:
+  sdk: ^3.6.0
+  flutter: '>=3.27.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: io.github.mohas7im.google_pay_payment_capturer
+        pluginClass: GooglePayPaymentCapturerPlugin
