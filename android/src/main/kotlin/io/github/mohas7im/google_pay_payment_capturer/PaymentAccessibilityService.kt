@@ -75,6 +75,76 @@ class PaymentAccessibilityService : AccessibilityService() {
         )
 
         /**
+         * CREDIT wording on a receipt — money came in. "Payment to you" shares
+         * the "payment to" marker that also flags a payment screen, so a
+         * received-money receipt still reaches [handlePaymentSuccess]; the
+         * direction check below then classifies it correctly instead of
+         * recording it as an expense.
+         */
+        private val RECEIVED_MARKERS = listOf(
+            "payment to you", "paid you", "received from", "money received",
+            "received payment", "you received", "credited to you",
+        )
+        /** "Received from Priya Nair" / "Priya Nair paid you ₹200" — the payer. */
+        private val RECEIVED_FROM = Regex("""received from\s+(.+)""", RegexOption.IGNORE_CASE)
+        private val PAID_YOU_BY = Regex("""^(.+?)\s+paid\s+you\b""", RegexOption.IGNORE_CASE)
+
+        /**
+         * Google Pay / UPI merchant category labels, lowercased → the canonical
+         * label passed to Flutter. GPay shows one as a subtitle or pill under a
+         * verified merchant's name / VPA on the payment and receipt screens.
+         */
+        private val GPAY_CATEGORY_LABELS: Map<String, String> = mapOf(
+            "food & beverage" to "Food & Beverage",
+            "food and beverage" to "Food & Beverage",
+            "food & drink" to "Food & Beverage",
+            "food & drinks" to "Food & Beverage",
+            "restaurants" to "Food & Beverage",
+            "restaurant" to "Food & Beverage",
+            "dining" to "Food & Beverage",
+            "groceries" to "Groceries",
+            "grocery" to "Groceries",
+            "supermarket" to "Groceries",
+            "retail & shopping" to "Retail & Shopping",
+            "retail and shopping" to "Retail & Shopping",
+            "shopping" to "Retail & Shopping",
+            "retail" to "Retail & Shopping",
+            "fuel" to "Fuel",
+            "petrol" to "Fuel",
+            "fuel & gas" to "Fuel",
+            "travel" to "Travel",
+            "transport" to "Travel",
+            "transportation" to "Travel",
+            "utilities" to "Utilities",
+            "bills & utilities" to "Utilities",
+            "healthcare" to "Healthcare",
+            "health" to "Healthcare",
+            "pharmacy" to "Healthcare",
+            "medical" to "Healthcare",
+            "entertainment" to "Entertainment",
+            "education" to "Education",
+            "electronics" to "Electronics",
+            "mobile & recharge" to "Mobile & Recharge",
+            "recharge" to "Mobile & Recharge",
+            "insurance" to "Insurance",
+        )
+
+        /**
+         * How long a merchant's category read on the pre-PIN "Paying …" screen
+         * is kept so it can attach to the receipt once the PIN is entered.
+         */
+        private const val CATEGORY_CACHE_MS = 60_000L
+
+        /** A word next to a merchant that is never a category label. */
+        private val NON_CATEGORY = setOf(
+            "paid", "sent", "paid to", "sent to", "payment", "completed", "success",
+            "successful", "done", "share", "view details", "see details", "details",
+            "bank", "upi", "upi id", "reference", "txn id", "transaction id",
+            "google pay", "phonepe", "paytm", "verified", "secured", "powered by",
+            "to", "from", "help", "home", "split",
+        )
+
+        /**
          * GPay's page while a payment goes through: "Paying ₹1 securely to"
          * then the payee ("PRIYA NAIR") as its own text, or on one line.
          */
@@ -341,6 +411,75 @@ class PaymentAccessibilityService : AccessibilityService() {
     )
     private var payingIntent: PayingIntent? = null
     private val flushPaying = Runnable { dispatchUnconfirmedPayment() }
+
+    /**
+     * Merchant (lowercased) → (category label, expiry). A category read on the
+     * pre-PIN "Paying …" screen is held here for [CATEGORY_CACHE_MS] so it can
+     * attach to the receipt once the PIN is entered and the success page renders.
+     */
+    private val categoryCache = mutableMapOf<String, Pair<String, Long>>()
+
+    private fun cacheCategory(merchant: String, label: String) {
+        if (merchant.isBlank()) return
+        categoryCache[merchant.lowercase().trim()] = label to (System.currentTimeMillis() + CATEGORY_CACHE_MS)
+    }
+
+    private fun cachedCategory(merchant: String): String? {
+        val key = merchant.lowercase().trim()
+        val entry = categoryCache[key] ?: return null
+        if (System.currentTimeMillis() > entry.second) {
+            categoryCache.remove(key)
+            return null
+        }
+        return entry.first
+    }
+
+    /** CREDIT when the screen says money came in, else DEBIT. */
+    private fun classifyDirection(lower: String): String =
+        if (RECEIVED_MARKERS.any { lower.contains(it) }) "CREDIT" else "DEBIT"
+
+    /**
+     * The merchant category label GPay shows under the verified merchant name /
+     * VPA, when present. Looks first at the few nodes right after the merchant
+     * (a subtitle or pill sits there), then anywhere on screen for a known
+     * label, then — only directly under the merchant header — accepts a short
+     * descriptor that isn't a VPA, amount or known non-category word.
+     */
+    private fun findCategoryLabel(texts: List<String>, merchant: String): String? {
+        val idx = if (merchant.isNotEmpty()) {
+            texts.indexOfFirst {
+                val t = it.trim()
+                t.equals(merchant, ignoreCase = true) || t.startsWith(merchant, ignoreCase = true)
+            }
+        } else -1
+        val window = if (idx >= 0) texts.subList(idx + 1, minOf(idx + 5, texts.size)) else emptyList()
+
+        // 1. Known category label just below the merchant header.
+        for (t in window) GPAY_CATEGORY_LABELS[t.trim().lowercase()]?.let { return it }
+        // 2. Known category label anywhere on the screen.
+        for (t in texts) GPAY_CATEGORY_LABELS[t.trim().lowercase()]?.let { return it }
+        // 3. A short descriptor directly under the merchant header.
+        for (t in window) {
+            val c = t.trim()
+            if (isLikelyCategoryDescriptor(c)) return c
+        }
+        return null
+    }
+
+    private fun isLikelyCategoryDescriptor(text: String): Boolean {
+        val t = text.trim()
+        if (t.length < 3 || t.length > 28) return false
+        if (t.contains('\n')) return false
+        if (t.contains("₹") || t.contains('@')) return false            // amount / VPA
+        if (!t[0].isLetter()) return false
+        if (t.matches(Regex("""[\d.,\s]+"""))) return false
+        val lower = t.lowercase()
+        if (NON_CATEGORY.any { lower == it }) return false
+        if (AMOUNT_PATTERN.matcher(t).find()) return false
+        if (UTR_PATTERN.matcher(t).find()) return false
+        // A category reads as a word or two of letters, maybe joined by "&".
+        return t.matches(Regex("""[\p{L}][\p{L} &/]{1,26}[\p{L}]""")) && t.count { it == ' ' } <= 2
+    }
 
     private var lastDumpHash = 0
 
@@ -1361,6 +1500,21 @@ class PaymentAccessibilityService : AccessibilityService() {
             }
         }
 
+        // ── Direction: paying (DEBIT) vs receiving (CREDIT) ────────────────────
+        val direction = classifyDirection(lower)
+        if (direction == "CREDIT") {
+            // The debit "to X" strategies read "you" as the counterparty on a
+            // "Payment to you" receipt; replace it with the payer:
+            // "Received from Priya Nair" / "Priya Nair paid you ₹200".
+            val payer = texts.firstNotNullOfOrNull { t ->
+                val line = t.trim()
+                RECEIVED_FROM.find(line)?.groupValues?.getOrNull(1)?.trim()?.takeIf { isValidMerchant(it) }
+                    ?: PAID_YOU_BY.find(line)?.groupValues?.getOrNull(1)?.trim()?.takeIf { isValidMerchant(it) }
+            }
+            merchant = payer ?: ""
+            if (merchant.equals("you", ignoreCase = true)) merchant = ""
+        }
+
         val merchantFound = merchant.isNotEmpty()
         if (merchant.isEmpty()) {
             merchant = when {
@@ -1370,6 +1524,9 @@ class PaymentAccessibilityService : AccessibilityService() {
                 else -> "UPI Payment"
             }
         }
+
+        // ── Merchant category label (part 2): this screen, else the pre-PIN cache
+        val gpayCategoryLabel = findCategoryLabel(texts, merchant) ?: cachedCategory(merchant)
 
         // ── UTR / Reference ID ────────────────────────────────────────────────
         var utrNumber = ""
@@ -1425,7 +1582,11 @@ class PaymentAccessibilityService : AccessibilityService() {
             else -> "payment screen"
         }
         val score = (if (merchantFound) 2 else 0) + (if (utrNumber.isNotEmpty()) 1 else 0)
-        offerPayment(record, paymentData(pkgName, amount, merchant, utrNumber, paidAt, texts, live, source), score)
+        offerPayment(
+            record,
+            paymentData(pkgName, amount, merchant, utrNumber, paidAt, texts, live, source, direction, gpayCategoryLabel),
+            score,
+        )
     }
 
     /** A payment bubble in a chat with a contact; [at] is null when it isn't from today. */
@@ -1481,10 +1642,17 @@ class PaymentAccessibilityService : AccessibilityService() {
         texts: List<String>,
         live: Boolean = true,
         source: String,
+        direction: String = "DEBIT",
+        gpayCategoryLabel: String? = null,
     ): Map<String, Any?> {
-        val title = "Paid ₹${String.format("%.2f", amount)} to $merchant"
+        val isCredit = direction == "CREDIT"
+        val title = if (isCredit) {
+            "Received ₹${String.format("%.2f", amount)} from $merchant"
+        } else {
+            "Paid ₹${String.format("%.2f", amount)} to $merchant"
+        }
         val body = listOfNotNull(
-            "On-screen captured payment",
+            if (isCredit) "On-screen captured receipt" else "On-screen captured payment",
             if (utrNumber.isNotEmpty()) "UPI Ref: $utrNumber" else null,
             "Completed",
         ).joinToString(" • ")
@@ -1499,11 +1667,15 @@ class PaymentAccessibilityService : AccessibilityService() {
             "postTime"      to paidAt,
             "amount"        to amount,
             "merchant"      to merchant,
-            "isExpense"     to true,
+            "isExpense"     to !isCredit,
+            // Explicit paying/receiving classification for Flutter.
+            "direction"     to direction,
+            // GPay's merchant category label, when shown (else null).
+            "gpayCategoryLabel" to gpayCategoryLabel,
             "isTransaction" to true,
             "channelId"     to "accessibility_screen_reader",
             "tag"           to "accessibility",
-            "category"      to "outgoing_payment",
+            "category"      to if (isCredit) "incoming_payment" else "outgoing_payment",
             "utrNumber"     to utrNumber,
             // Filled in with a fresh fix when the capture is sent, if [live].
             "live"          to live,
@@ -1581,6 +1753,9 @@ class PaymentAccessibilityService : AccessibilityService() {
     }
 
     private fun notePaying(pkgName: String, amount: Double, payee: String, texts: List<String>) {
+        // GPay often shows the merchant's category on this pre-PIN screen but
+        // not on the receipt; cache it for 60 s so it attaches to the receipt.
+        findCategoryLabel(texts, payee)?.let { cacheCategory(payee, it) }
         val p = payingIntent
         if (p != null && p.pkg == pkgName && kotlin.math.abs(p.amount - amount) < 0.001 && sameName(p.payee, payee)) {
             touchPaying(p)

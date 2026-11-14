@@ -3,7 +3,7 @@ description: >-
   Reads UPI payments on Android — Google Pay, PhonePe, Paytm, BHIM — from their
   notifications and their payment screens (accessibility), including the
   payee, UPI reference, group splits and where the payment was made.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/mohas7im/googlepay-payment-capturer
 issue_tracker: https://github.com/mohas7im/googlepay-payment-capturer/issues
 topics:

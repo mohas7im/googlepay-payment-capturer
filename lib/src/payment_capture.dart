@@ -65,6 +65,15 @@ class PaymentCapture {
 
   /// true: money went out; false: money came in; null: unknown.
   final bool? isExpense;
+
+  /// "DEBIT" (paying), "CREDIT" (receiving) or "UNKNOWN". Mirrors [isExpense];
+  /// sent explicitly by the screen reader, derived from [isExpense] otherwise.
+  final String direction;
+
+  /// The merchant category GPay showed under the merchant name / VPA, when
+  /// present (e.g. "Food & Beverage", "Groceries", "Fuel"); null otherwise.
+  final String? gpayCategoryLabel;
+
   final String utrNumber;
   final double? latitude;
   final double? longitude;
@@ -91,6 +100,8 @@ class PaymentCapture {
     this.amount,
     this.merchant = '',
     this.isExpense,
+    this.direction = 'UNKNOWN',
+    this.gpayCategoryLabel,
     this.utrNumber = '',
     this.latitude,
     this.longitude,
@@ -159,6 +170,13 @@ class PaymentCapture {
       }
     }
 
+    // Direction: the screen reader sends it; derive it from isExpense otherwise.
+    final direction = switch ((raw['direction'] as String?)?.toUpperCase()) {
+      'DEBIT' => 'DEBIT',
+      'CREDIT' => 'CREDIT',
+      _ => switch (isExpense) { true => 'DEBIT', false => 'CREDIT', null => 'UNKNOWN' },
+    };
+
     return PaymentCapture(
       raw: raw,
       id: raw['id']?.toString(),
@@ -170,6 +188,10 @@ class PaymentCapture {
       amount: amount,
       merchant: merchant,
       isExpense: isExpense,
+      direction: direction,
+      gpayCategoryLabel: (raw['gpayCategoryLabel'] as String?)?.trim().isNotEmpty == true
+          ? (raw['gpayCategoryLabel'] as String).trim()
+          : null,
       utrNumber: (raw['utrNumber'] as String?) ?? '',
       latitude: (raw['latitude'] as num?)?.toDouble(),
       longitude: (raw['longitude'] as num?)?.toDouble(),

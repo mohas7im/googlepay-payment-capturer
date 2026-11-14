@@ -1,3 +1,14 @@
+## 0.2.0
+
+- Classify each on-screen capture as paying (`DEBIT`) or receiving (`CREDIT`);
+  a "Payment to you" / "Received from" / "paid you" receipt is now read as a
+  credit (payer as counterparty) instead of being recorded as an expense.
+- Read the merchant category label GPay shows under the merchant name / VPA
+  (e.g. "Food & Beverage", "Groceries", "Fuel") and send it as
+  `gpayCategoryLabel`. A category seen on the pre-PIN "Paying …" screen is
+  cached for 60 s so it attaches to the receipt.
+- `PaymentCapture` now exposes `direction` and `gpayCategoryLabel`.
+
 ## 0.1.0
 
 First release.
